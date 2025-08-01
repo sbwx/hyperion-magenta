@@ -205,7 +205,7 @@ void speaker_thread();
 
 K_THREAD_DEFINE(screen_tid, STACK_SIZE, screen_thread, NULL, NULL, NULL, SCREEN_THREAD_PRIORITY, 0, 0);
 K_THREAD_DEFINE(bt_tid, STACK_SIZE, bt_thread, NULL, NULL, NULL, BT_THREAD_PRIORITY, 0, 0);
-K_THREAD_DEFINE(speaker_tid, STACK_SIZE, speaker_thread, NULL, NULL, NULL, SPEAKER_THREAD_PRIORITY, 0, 0);
+//K_THREAD_DEFINE(speaker_tid, STACK_SIZE, speaker_thread, NULL, NULL, NULL, SPEAKER_THREAD_PRIORITY, 0, 0);
 
  // macro for converting uint32 to float while preserving bit order
  #define UINT32_TO_FLOAT(i, f) {	\
@@ -328,6 +328,11 @@ void screen_thread(void) {
 	gpio_init_callback(&button0_cb_data, button0_pressed, BIT(button0.pin));
 	gpio_add_callback(button0.port, &button0_cb_data);
 
+    gpio_pin_configure_dt(&button1, GPIO_INPUT);
+	gpio_pin_interrupt_configure_dt(&button1, GPIO_INT_EDGE_TO_ACTIVE);
+	gpio_init_callback(&button1_cb_data, button1_pressed, BIT(button1.pin));
+	gpio_add_callback(button1.port, &button1_cb_data);
+    
     while (1) {
 
         // If you're dead
@@ -366,6 +371,11 @@ void screen_thread(void) {
                 
                 // Render a new block at the top of the screen
                 Block* block = (Block*)k_malloc(sizeof(Block));
+
+                if (!block) {
+                    printk("kys\r\n");
+                }
+
                 block->x = sys_rand8_get() % 4;
                 block->y = 30;
 
@@ -375,6 +385,11 @@ void screen_thread(void) {
         } else if (numBlocks == 0) {
         
             Block* block = (Block*)k_malloc(sizeof(Block));
+            
+            if (!block) {
+                printk("kys #2\r\n");
+            }
+            
             block->x = sys_rand8_get() % 4;
             block->y = 30;
 
@@ -433,7 +448,7 @@ void screen_thread(void) {
             Block* currBlock;
 
             if (!k_msgq_peek_at(&blockQ, &currBlock, i)) {
-    
+   
                 set_note(currBlock->x, currBlock->y);
                 clear_block_top(currBlock->x, currBlock->y); 
                 
@@ -459,8 +474,6 @@ void screen_thread(void) {
  uint8_t get_node(const bt_addr_le_t *addr) {
 	uint8_t leftAddr[6] = {0x1E, 0xD2, 0xE4, 0x9F, 0x28, 0xEC};
 	uint8_t rightAddr[6] = {0x90, 0x75, 0x13, 0xED, 0xBA, 0xD7};
-	// mac address for mobile node (THINGY52)
-	uint8_t mobileAddr[6] = {0xFE, 0xC0, 0x04, 0xFD, 0x5D, 0xC5};
 
 	for (uint8_t i = 0; i < 6; i++) {
 		if (addr->a.val[i] == leftAddr[i]) {
@@ -472,21 +485,12 @@ void screen_thread(void) {
 			break;
 		}
 	}
+
     for (uint8_t i = 0; i < 6; i++) {
 		if (addr->a.val[i] == rightAddr[i]) {
 			if (i == 5) {
 				// thats the one
 				return 2;
-			}
-		} else {
-			break;
-		}
-	}
-    for (uint8_t i = 0; i < 6; i++) {
-		if (addr->a.val[i] == mobileAddr[i]) {
-			if (i == 5) {
-				// thats the one
-				return 3;
 			}
 		} else {
 			break;
@@ -499,7 +503,7 @@ void screen_thread(void) {
 // ad parsing function for ultrasonic adv
 static bool parse_us_cb(struct bt_data *data, void *user_data) {
     // something
-    uint8_t pos = *(uint8_t*)user_data;
+    uint8_t pos = 0; //*(uint8_t*)user_data;
     struct k_msgq* usNodes[3] = {&leftQ, &midQ, &rightQ};
 	// temp variable to store individual 4 bytes from ultrasonic node transmission
 	uint8_t float_part[4] = {0};
@@ -518,23 +522,6 @@ static bool parse_us_cb(struct bt_data *data, void *user_data) {
 	return true;
 }
 
-// ad parsing function for ultrasonic adv
-static bool parse_mobile_cb(struct bt_data *data, void *user_data) {
-/*     int8_t* rssiArr;
-    k_msgq_peek(&rssiQ, &rssiArr); */
-	// temp variable to store individual 4 bytes from ultrasonic node transmission
-
-	if (data->type == BT_DATA_MANUFACTURER_DATA && data->data_len >= 25) {
-		const uint8_t *d = data->data;
-		if ((d[20] < 8)) {
-		    stupidArr[d[20]] = (int8_t)d[21];
-        } 
-        if (d[22] < 8) {
-		    stupidArr[d[22]] = (int8_t)d[23];
-        }
-	}
-	return true;
-}
 
 // callback function for when device found
 static void device_found(const bt_addr_le_t *addr, int8_t rssi, uint8_t type, struct net_buf_simple *ad) { 
@@ -542,13 +529,7 @@ static void device_found(const bt_addr_le_t *addr, int8_t rssi, uint8_t type, st
 	if (type != BT_GAP_ADV_TYPE_ADV_SCAN_IND) {
 		return;
 	} 
-    uint8_t pos = get_node(addr);
-    if (pos < 0) {
-        return;
-    } else if (pos == 3) {
-        bt_data_parse(ad, parse_mobile_cb, NULL);
-        return;
-    }
+    
     bt_data_parse(ad, parse_us_cb, &pos);
 }
 
@@ -681,10 +662,6 @@ float estimate(float measurement, KalmanFilter* kalman) {
 }
 
 void bt_thread() {
-    gpio_pin_configure_dt(&button1, GPIO_INPUT);
-	gpio_pin_interrupt_configure_dt(&button1, GPIO_INT_EDGE_TO_ACTIVE);
-	gpio_init_callback(&button1_cb_data, button1_pressed, BIT(button1.pin));
-	gpio_add_callback(button1.port, &button1_cb_data);
 
     float leftVal = 0;
     float rightVal = 0;
@@ -708,8 +685,6 @@ void bt_thread() {
     uint8_t lives = 0;
     uint8_t score = 0;
     uint8_t combo = 0;
-
-    struct tagioObj fuck;
 
     KalmanFilter rssiKalman = { 
 		.kalmanGain = 0.f,
@@ -795,7 +770,7 @@ void bt_thread() {
     } */
 
     while (1) {
-        for (int i = 0; i < 8; i++) {
+        /*for (int i = 0; i < 8; i++) {
             distArr[i] = rssi_to_dist(i, stupidArr[i]);
             //printk("Dist %d:    %f\r\n", i, distArr[i]);
         }
@@ -825,7 +800,7 @@ void bt_thread() {
             rssiPos = (leftDist > 0.45);
         } else {
             rssiPos = 3 - (rightDist > 0.45);
-        }
+        }*/
         //printk("RSSI Pos:   %d\r\n", rssiPos);
 
          // Pick the closest distance value (left node if 1)
@@ -835,7 +810,7 @@ void bt_thread() {
             printk("Right node closer RSSI\r\n");
         } */
 
-         multilateration_new(nodes, distArr, coords);
+         /*multilateration_new(nodes, distArr, coords);
         multiY = coords[1];
         if (multiY > 4) {
 			multiY = 4;
@@ -855,26 +830,8 @@ void bt_thread() {
 
         multiY = estimate(multiY, &rssiKalman);
 
-        fuck.variable = (char*)k_malloc(sizeof(char) * 10);
-			fuck.value = (char*)k_malloc(sizeof(char) * 15);
-			fuck.unit = (char*)k_malloc(sizeof(char) * 4);
-
 			// print int  to string
 			//printk("Cumulative Distance:	%.3f\r\n", cumDist);
-            sprintf(fuck.value, "%.3f", multiY);
-
-			// Create the variable string for the JSON
-            snprintf(fuck.variable, 10, "rssiY");
-            
-            // Set the units
-            strcpy(fuck.unit, "m");
-            
-            // Encode the JSON
-            json_obj_encode_buf(tagioObjDescriptor, 3, &fuck, jsonDataBuf, JSON_BUFFER_SIZE);
-            
-			// TODO uncomment this
-            printk("%s\r\n", jsonDataBuf);
-            memset(jsonDataBuf, 0, JSON_BUFFER_SIZE);
 
         //printk("Kalmanned:  %f\r\n", multiY);
 
@@ -884,7 +841,7 @@ void bt_thread() {
         multiPos = (uint8_t)roundf(multiY);
 
         //printk("BLE y Coord:  %f\r\n", coords[1]);
-
+*/
         k_msgq_get(&leftQ, &leftVal, K_NO_WAIT);
         k_msgq_get(&rightQ, &rightVal, K_NO_WAIT);
 
@@ -907,45 +864,7 @@ void bt_thread() {
         //printk("left estimate\r\n");
         leftVal = estimate(leftVal, &leftKalman);
 
-        // print int  to string
-        //printk("Cumulative Distance:	%.3f\r\n", cumDist);
-        sprintf(fuck.value, "%.3f", leftVal);
-
-        // Create the variable string for the JSON
-        snprintf(fuck.variable, 10, "usLeft");
-        
-        // Set the units
-        strcpy(fuck.unit, "m");
-        
-        // Encode the JSON
-        json_obj_encode_buf(tagioObjDescriptor, 3, &fuck, jsonDataBuf, JSON_BUFFER_SIZE);
-        
-        // TODO uncomment this
-        printk("%s\r\n", jsonDataBuf);
-        memset(jsonDataBuf, 0, JSON_BUFFER_SIZE);
-        //printk("right estimate\r\n");
         rightVal = estimate(rightVal, &rightKalman);
-
-        // print int  to string
-        //printk("Cumulative Distance:	%.3f\r\n", cumDist);
-        sprintf(fuck.value, "%.3f", rightVal);
-
-        // Create the variable string for the JSON
-        snprintf(fuck.variable, 10, "usRight");
-        
-        // Set the units
-        strcpy(fuck.unit, "m");
-        
-        // Encode the JSON
-        json_obj_encode_buf(tagioObjDescriptor, 3, &fuck, jsonDataBuf, JSON_BUFFER_SIZE);
-        
-        // TODO uncomment this
-        printk("%s\r\n", jsonDataBuf);
-        memset(jsonDataBuf, 0, JSON_BUFFER_SIZE);
-
-        k_free(fuck.variable);
-        k_free(fuck.unit);
-        k_free(fuck.value);
 
         if (pick_closest(leftVal, rightVal)) {
             tempPos = (leftVal > 1);
@@ -954,10 +873,9 @@ void bt_thread() {
         }
         //printk("Ultrasonic Pos:    %d\r\n", tempPos);
 
-        uint8_t fuckingPos = (uint8_t)roundf((tempPos + rssiPos) / 2);
         //printk("Average Pos: %d\r\n", fuckingPos);
  
-        k_msgq_put(&playerPos, &fuckingPos, K_NO_WAIT);
+        k_msgq_put(&playerPos, &tempPos, K_NO_WAIT);
 
         k_msgq_peek(&lifeQ, &lives);
         k_msgq_peek(&scoreQ, &score);
